@@ -1,18 +1,39 @@
 import * as http from "http";
-import { URL } from "url";
+import * as URL from "url";
 import * as querystring from "querystring";
 import * as fs from "fs";
 import * as path from "path";
+import { fileURLToPath } from "url";
 
-export const expess = () => {
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+export const express = () => {
   const app = {};
 
   const get = {
     handler: [],
     path: [],
+    params: [],
+  };
+
+  const post = {
+    handler: [],
+    path: [],
   };
 
   const middlewareStack = [];
+
+  const estatico = (directoryPath) => {
+    return function (req, res, next) {
+      const filePath = path.join(directoryPath, req.url);
+      const fileStream = fs.createReadStream(filePath);
+
+      fileStream.on("error", () => {
+        next();
+      });
+      fileStream.pipe(res);
+    };
+  };
 
   app.listen = (port, callback) => {
     const server = http.createServer(requestHandler);
@@ -24,12 +45,30 @@ export const expess = () => {
   app.get = (path, handler) => {
     get.handler.push(handler);
 
-    if (path.includes("/")) {
-      let urlPath = path.split(":")[0];
-      urlPath = urlPath.substring(0, urlPath.length - 1);
+    if (path.includes("/:")) {
+      let [urlPath, param] = path.split(":");
+      urlPath = urlPath.slice(0, urlPath.length);
       get.path.push(urlPath);
+      get.params.push({
+        name: param,
+        basePath: urlPath,
+        index: get.path.length - 1,
+      });
     } else {
       get.path.push(path);
+    }
+    console.log(get);
+  };
+
+  app.post = (path, handler) => {
+    post.handler.push(handler);
+
+    if (path.includes("/:")) {
+      let urlPath = path.split(":")[0];
+      let param = (urlPath = urlPath.substring(0, urlPath.length - 1));
+      post.path.push(urlPath);
+    } else {
+      post.path.push(path);
     }
   };
 
@@ -44,20 +83,63 @@ export const expess = () => {
     });
   };
 
+  app.use(estatico(__dirname + "/public"));
+
   function manageRouteHandler(req, res) {
     const method = req.method;
     const url = req.url;
-    const parsedUrl = req.parse(url);
+    const parsedUrl = URL.parse(url);
     const paredQuery = querystring.parse(parsedUrl.query);
 
+    // const id = req.url.split("/")[1];
+    // console.log(id);
     req.query = paredQuery;
 
-    if (method === "GET" && get.path.includes(parsedUrl.pathname)) {
-      const handlerIndex = get.path.indexOf(parsedUrl.pathname);
-      get.handler[handlerIndex](req, res);
+    if (method === "GET") {
+      if (get.path.includes(parsedUrl.pathname)) {
+        const handlerIndex = get.path.indexOf(parsedUrl.pathname);
+        get.handler[handlerIndex](req, res);
+      } else {
+        let [basePath, param] = parsedUrl.pathname.split("/");
+        if (basePath.length === 0) basePath = "/";
+        console.log(basePath, param);
+        const matchParams = get.params.find(
+          (item) => item.basePath === basePath
+        );
+        if (matchParams) {
+          req.params = { [matchParams.name]: param };
+          get.handler[matchParams.index](req, res);
+        }
+      }
+    } else if (method === "POST" && post.path.includes(parsedUrl.pathname)) {
+      const handlerIndex = post.path.indexOf(parsedUrl.pathname);
+      post.handler[handlerIndex](req, res);
     } else {
-      res.statusCode(404);
+      res.statusCode = 404;
       res.end("Cannot ${method} ${url}");
+    }
+  }
+
+  function handleMiddleware(req, res, index) {
+    if (index === middlewareStack.length) {
+      manageRouteHandler(req, res);
+      return;
+    } else {
+      if (middlewareStack[index].path) {
+        if (middlewareStack[index].path === req.url) {
+          const middlewareFunction = middlewareStack[index].middleware;
+          middlewareFunction(req, res, () => {
+            handleMiddleware(req, res, index + 1);
+          });
+        } else {
+          middlewareHandler(req, res, index + 1);
+        }
+      } else {
+        const middlewareFunction = middlewareStack[index].middleware;
+        middlewareFunction(req, res, () => {
+          handleMiddleware(req, res, index + 1);
+        });
+      }
     }
   }
 
@@ -80,8 +162,8 @@ export const expess = () => {
     }
     res.send = (response) => {
       res.writeHead(200, { "Content-Type": "text/html" });
-      res.write(`<p>${response}</p>`);
-      res.send();
+      res.write(`${response}`);
+      res.end();
     };
     res.sendFile = (pathOfFile) => {
       const contentType = getContentType(pathOfFile);
@@ -102,6 +184,7 @@ export const expess = () => {
       res.end();
     };
     manageRouteHandler(req, res);
+    handleMiddleware(req, res, 0);
   };
 
   return app;
