@@ -19,6 +19,18 @@ export const express = () => {
   const post = {
     handler: [],
     path: [],
+    params: [],
+  };
+  const _delete = {
+    handler: [],
+    path: [],
+    params: [],
+  };
+
+  const update = {
+    handler: [],
+    path: [],
+    params: [],
   };
 
   const middlewareStack = [];
@@ -47,7 +59,6 @@ export const express = () => {
 
     if (path.includes("/:")) {
       let [urlPath, param] = path.split(":");
-      urlPath = urlPath.slice(0, urlPath.length);
       get.path.push(urlPath);
       get.params.push({
         name: param,
@@ -57,19 +68,42 @@ export const express = () => {
     } else {
       get.path.push(path);
     }
-    console.log(get);
   };
 
   app.post = (path, handler) => {
     post.handler.push(handler);
 
     if (path.includes("/:")) {
-      let urlPath = path.split(":")[0];
-      let param = (urlPath = urlPath.substring(0, urlPath.length - 1));
+      let [urlPath, param] = path.split(":");
       post.path.push(urlPath);
+      post.params.push({
+        name: param,
+        basePath: urlPath,
+        index: post.path.length - 1,
+      });
     } else {
       post.path.push(path);
     }
+  };
+
+  app.delete = (path, handler) => {
+    _delete.handler.push(handler);
+
+    if (path.includes("/:")) {
+      let [urlPath, param] = path.split(":");
+      _delete.path.push(urlPath);
+      _delete.params.push({
+        name: param,
+        basePath: urlPath,
+        index: _delete.path.length - 1,
+      });
+    } else {
+      _delete.path.push(path);
+    }
+  };
+
+  app.update = (path, handler) => {
+    update.handler.push(handler);
   };
 
   app.use = (path, middleware) => {
@@ -90,33 +124,97 @@ export const express = () => {
     const url = req.url;
     const parsedUrl = URL.parse(url);
     const paredQuery = querystring.parse(parsedUrl.query);
-
-    // const id = req.url.split("/")[1];
-    // console.log(id);
     req.query = paredQuery;
 
-    if (method === "GET") {
-      if (get.path.includes(parsedUrl.pathname)) {
-        const handlerIndex = get.path.indexOf(parsedUrl.pathname);
-        get.handler[handlerIndex](req, res);
-      } else {
-        let [basePath, param] = parsedUrl.pathname.split("/");
-        if (basePath.length === 0) basePath = "/";
-        console.log(basePath, param);
-        const matchParams = get.params.find(
-          (item) => item.basePath === basePath
-        );
-        if (matchParams) {
-          req.params = { [matchParams.name]: param };
-          get.handler[matchParams.index](req, res);
+    let bodyArr = [];
+
+    if (!req.listenerCount("data")) {
+      req.on("data", (chunk) => {
+        bodyArr.push(chunk);
+      });
+    }
+
+    switch (method) {
+      case "GET":
+        if (get.path.includes(parsedUrl.pathname)) {
+          const handlerIndex = get.path.indexOf(parsedUrl.pathname);
+          get.handler[handlerIndex](req, res);
+        } else {
+          let pathArr = parsedUrl.pathname.split("/");
+          let basePath = pathArr.splice(0, pathArr.length - 1).join("/");
+          let param = pathArr[pathArr.length - 1];
+          basePath += "/";
+          const matchParams = get.params.find(
+            (item) => item.basePath === basePath
+          );
+          if (matchParams) {
+            req.params = { [matchParams.name]: param };
+            get.handler[matchParams.index](req, res);
+          } else {
+            res.statusCode = 404;
+            res.end(`Cannot ${method} ${url}`);
+          }
         }
-      }
-    } else if (method === "POST" && post.path.includes(parsedUrl.pathname)) {
-      const handlerIndex = post.path.indexOf(parsedUrl.pathname);
-      post.handler[handlerIndex](req, res);
-    } else {
-      res.statusCode = 404;
-      res.end("Cannot ${method} ${url}");
+        break;
+      case "POST":
+        if (post.path.includes(parsedUrl.pathname)) {
+          const handlerIndex = post.path.indexOf(parsedUrl.pathname);
+          if (!req.listenerCount("end")) {
+            req.on("end", () => {
+              bodyArr = Buffer.concat(bodyArr).toString();
+              req.body = JSON.parse(bodyArr);
+
+              post.handler[handlerIndex](req, res);
+            });
+          }
+        } else {
+          let pathArr = parsedUrl.pathname.split("/");
+          let basePath = pathArr.splice(0, pathArr.length - 1).join("/");
+          let param = pathArr[pathArr.length - 1];
+          basePath += "/";
+          const matchParams = post.params.find(
+            (item) => item.basePath === basePath
+          );
+          if (matchParams) {
+            req.params = { [matchParams.name]: param };
+            if (!req.listenerCount("end")) {
+              req.on("end", () => {
+                bodyArr = Buffer.concat(bodyArr).toString();
+                req.body = JSON.parse(bodyArr);
+                post.handler[matchParams.index](req, res);
+              });
+            }
+          } else {
+            res.statusCode = 404;
+            res.end(`Cannot ${method} ${url}`);
+          }
+        }
+        break;
+      case "DELETE":
+        if (_delete.path.includes(parsedUrl.pathname)) {
+          const handlerIndex = _delete.path.indexOf(parsedUrl.pathname);
+          _delete.handler[handlerIndex](req, res);
+        } else {
+          let pathArr = parsedUrl.pathname.split("/");
+          let basePath = pathArr.splice(0, pathArr.length - 1).join("/");
+          let param = pathArr[pathArr.length - 1];
+          basePath += "/";
+          const matchParams = _delete.params.find(
+            (item) => item.basePath === basePath
+          );
+          if (matchParams) {
+            req.params = { [matchParams.name]: param };
+            _delete.handler[matchParams.index](req, res);
+          } else {
+            res.statusCode = 404;
+            res.end(`Cannot ${method} ${url}`);
+          }
+        }
+        break;
+      default:
+        res.statusCode = 404;
+        res.end(`Cannot ${method} ${url}`);
+        break;
     }
   }
 
@@ -163,6 +261,11 @@ export const express = () => {
     res.send = (response) => {
       res.writeHead(200, { "Content-Type": "text/html" });
       res.write(`${response}`);
+      res.end();
+    };
+    res.json = (response) => {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.write(`${JSON.stringify(response)}`);
       res.end();
     };
     res.sendFile = (pathOfFile) => {
