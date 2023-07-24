@@ -14,8 +14,22 @@ app.get("/:id", (req, res) => {
 app.get("/user", (req, res) => {
   res.send("this is the user");
 });
+app.post("/user", (req, res) => {
+  const { email } = req.body;
+  res.json({ email });
+});
+app.post("/user/:id", (req, res) => {
+  const { id } = req.params;
+  const { email } = req.body;
+  res.json({ id, email });
+});
 
 app.get("/user/:id", (req, res) => {
+  const id = req.params.id;
+  res.send(id);
+});
+
+app.delete("/user/:id", (req, res) => {
   const id = req.params.id;
   res.send(id);
 });
