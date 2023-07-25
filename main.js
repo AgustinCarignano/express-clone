@@ -1,36 +1,37 @@
 import * as http from "http";
-import * as URL from "url";
+import { URL } from "url";
 import * as querystring from "querystring";
 import * as fs from "fs";
 import * as path from "path";
 import { fileURLToPath } from "url";
+import { routerExecutor } from "./routerExecutor.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export const express = () => {
     const app = {};
 
-    const get = {
-        handler: [],
-        path: [],
-        params: [],
-    };
-
-    const post = {
-        handler: [],
-        path: [],
-        params: [],
-    };
-    const _delete = {
-        handler: [],
-        path: [],
-        params: [],
-    };
-
-    const put = {
-        handler: [],
-        path: [],
-        params: [],
+    const methods = {
+        GET: {
+            handler: [],
+            path: [],
+            params: [],
+        },
+        POST: {
+            handler: [],
+            path: [],
+            params: [],
+        },
+        PUT: {
+            handler: [],
+            path: [],
+            params: [],
+        },
+        DELETE: {
+            handler: [],
+            path: [],
+            params: [],
+        },
     };
 
     const middlewareStack = [];
@@ -54,68 +55,35 @@ export const express = () => {
         });
     };
 
-    app.get = (path, handler) => {
-        get.handler.push(handler);
-
+    function defineMethod(method, path, handler) {
+        methods[method].handler.push(handler);
         if (path.includes("/:")) {
             let [urlPath, param] = path.split(":");
-            get.path.push(urlPath);
-            get.params.push({
+            methods[method].path.push(urlPath);
+            methods[method].params.push({
                 name: param,
                 basePath: urlPath,
-                index: get.path.length - 1,
+                index: methods[method].path.length - 1,
             });
         } else {
-            get.path.push(path);
+            methods[method].path.push(path);
         }
+    }
+
+    app.get = (path, handler) => {
+        defineMethod("GET", path, handler);
     };
 
     app.post = (path, handler) => {
-        post.handler.push(handler);
-
-        if (path.includes("/:")) {
-            let [urlPath, param] = path.split(":");
-            post.path.push(urlPath);
-            post.params.push({
-                name: param,
-                basePath: urlPath,
-                index: post.path.length - 1,
-            });
-        } else {
-            post.path.push(path);
-        }
+        defineMethod("POST", path, handler);
     };
 
     app.put = (path, handler) => {
-        put.handler.push(handler);
-
-        if (path.includes("/:")) {
-            let [urlPath, param] = path.split(":");
-            put.path.push(urlPath);
-            put.params.push({
-                name: param,
-                basePath: urlPath,
-                index: put.path.length - 1,
-            });
-        } else {
-            put.path.push(path);
-        }
+        defineMethod("PUT", path, handler);
     };
 
     app.delete = (path, handler) => {
-        _delete.handler.push(handler);
-
-        if (path.includes("/:")) {
-            let [urlPath, param] = path.split(":");
-            _delete.path.push(urlPath);
-            _delete.params.push({
-                name: param,
-                basePath: urlPath,
-                index: _delete.path.length - 1,
-            });
-        } else {
-            _delete.path.push(path);
-        }
+        defineMethod("DELETE", path, handler);
     };
 
     app.use = (path, middleware) => {
@@ -132,127 +100,14 @@ export const express = () => {
     app.use(estatico(__dirname + "/public"));
 
     function manageRouteHandler(req, res) {
-        const method = req.method;
+        const baseURL = req.protocol + "://" + req.headers.host + "/";
         const url = req.url;
-        const parsedUrl = URL.parse(url);
+        const parsedUrl = new URL(url, baseURL);
         const paredQuery = querystring.parse(parsedUrl.query);
+        req.pathname = parsedUrl.pathname;
         req.query = paredQuery;
 
-        let bodyArr = [];
-
-        if (!req.listenerCount("data")) {
-            req.on("data", (chunk) => {
-                bodyArr.push(chunk);
-            });
-        }
-
-        switch (method) {
-            case "GET":
-                if (get.path.includes(parsedUrl.pathname)) {
-                    const handlerIndex = get.path.indexOf(parsedUrl.pathname);
-                    get.handler[handlerIndex](req, res);
-                } else {
-                    let pathArr = parsedUrl.pathname.split("/");
-                    let basePath = pathArr.splice(0, pathArr.length - 1).join("/");
-                    let param = pathArr[pathArr.length - 1];
-                    basePath += "/";
-                    const matchParams = get.params.find((item) => item.basePath === basePath);
-                    if (matchParams) {
-                        req.params = { [matchParams.name]: param };
-                        get.handler[matchParams.index](req, res);
-                    } else {
-                        res.statusCode = 404;
-                        res.end(`Cannot ${method} ${url}`);
-                    }
-                }
-                break;
-            case "POST":
-                if (post.path.includes(parsedUrl.pathname)) {
-                    const handlerIndex = post.path.indexOf(parsedUrl.pathname);
-                    if (!req.listenerCount("end")) {
-                        req.on("end", () => {
-                            bodyArr = Buffer.concat(bodyArr).toString();
-                            req.body = bodyArr ? JSON.parse(bodyArr) : undefined;
-
-                            post.handler[handlerIndex](req, res);
-                        });
-                    }
-                } else {
-                    let pathArr = parsedUrl.pathname.split("/");
-                    let basePath = pathArr.splice(0, pathArr.length - 1).join("/");
-                    let param = pathArr[pathArr.length - 1];
-                    basePath += "/";
-                    const matchParams = post.params.find((item) => item.basePath === basePath);
-                    if (matchParams) {
-                        req.params = { [matchParams.name]: param };
-                        if (!req.listenerCount("end")) {
-                            req.on("end", () => {
-                                bodyArr = Buffer.concat(bodyArr).toString();
-                                req.body = bodyArr ? JSON.parse(bodyArr) : undefined;
-                                post.handler[matchParams.index](req, res);
-                            });
-                        }
-                    } else {
-                        res.statusCode = 404;
-                        res.end(`Cannot ${method} ${url}`);
-                    }
-                }
-                break;
-            case "PUT":
-                if (put.path.includes(parsedUrl.pathname)) {
-                    const handlerIndex = put.path.indexOf(parsedUrl.pathname);
-                    if (!req.listenerCount("end")) {
-                        req.on("end", () => {
-                            bodyArr = Buffer.concat(bodyArr).toString();
-                            req.body = bodyArr ? JSON.parse(bodyArr) : undefined;
-                            put.handler[handlerIndex](req, res);
-                        });
-                    }
-                } else {
-                    let pathArr = parsedUrl.pathname.split("/");
-                    let basePath = pathArr.splice(0, pathArr.length - 1).join("/");
-                    let param = pathArr[pathArr.length - 1];
-                    basePath += "/";
-                    const matchParams = put.params.find((item) => item.basePath === basePath);
-                    if (matchParams) {
-                        req.params = { [matchParams.name]: param };
-                        if (!req.listenerCount("end")) {
-                            req.on("end", () => {
-                                bodyArr = Buffer.concat(bodyArr).toString();
-                                req.body = bodyArr ? JSON.parse(bodyArr) : undefined;
-                                put.handler[matchParams.index](req, res);
-                            });
-                        }
-                    } else {
-                        res.statusCode = 404;
-                        res.end(`Cannot ${method} ${url}`);
-                    }
-                }
-                break;
-            case "DELETE":
-                if (_delete.path.includes(parsedUrl.pathname)) {
-                    const handlerIndex = _delete.path.indexOf(parsedUrl.pathname);
-                    _delete.handler[handlerIndex](req, res);
-                } else {
-                    let pathArr = parsedUrl.pathname.split("/");
-                    let basePath = pathArr.splice(0, pathArr.length - 1).join("/");
-                    let param = pathArr[pathArr.length - 1];
-                    basePath += "/";
-                    const matchParams = _delete.params.find((item) => item.basePath === basePath);
-                    if (matchParams) {
-                        req.params = { [matchParams.name]: param };
-                        _delete.handler[matchParams.index](req, res);
-                    } else {
-                        res.statusCode = 404;
-                        res.end(`Cannot ${method} ${url}`);
-                    }
-                }
-                break;
-            default:
-                res.statusCode = 404;
-                res.end(`Cannot ${method} ${url}`);
-                break;
-        }
+        routerExecutor(methods, req, res);
     }
 
     function handleMiddleware(req, res, index) {
@@ -267,7 +122,7 @@ export const express = () => {
                         handleMiddleware(req, res, index + 1);
                     });
                 } else {
-                    middlewareHandler(req, res, index + 1);
+                    handleMiddleware(req, res, index + 1);
                 }
             } else {
                 const middlewareFunction = middlewareStack[index].middleware;
@@ -323,7 +178,7 @@ export const express = () => {
             res.writeHead(301, { Location: route });
             res.end();
         };
-        manageRouteHandler(req, res);
+        // manageRouteHandler(req, res);
         handleMiddleware(req, res, 0);
     };
 
